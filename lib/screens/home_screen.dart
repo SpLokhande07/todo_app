@@ -162,7 +162,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   },
                   onDelete: () async {
                     try {
-                      await ref.read(todoProvider.notifier).deleteTodo(todo.id!);
+                      await ref
+                          .read(todoProvider.notifier)
+                          .deleteTodo(todo.id!);
                     } catch (e) {
                       if (mounted) {
                         ErrorDialog.show(

@@ -23,7 +23,6 @@ class _ConnectivityWrapperState extends ConsumerState<ConnectivityWrapper> {
     final connectivityService = ref.read(connectivityServiceProvider);
     connectivityService.onConnectivityChanged.listen((isConnected) {
       if (isConnected) {
-        // Retry failed requests when connection is restored
         ref.read(retryQueueProvider.notifier).retryFailedRequests();
       }
     });

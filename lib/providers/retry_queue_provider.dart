@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-final retryQueueProvider = StateNotifierProvider<RetryQueueNotifier, List<RetryRequest>>((ref) {
+final retryQueueProvider =
+    StateNotifierProvider<RetryQueueNotifier, List<RetryRequest>>((ref) {
   return RetryQueueNotifier();
 });
 
@@ -37,7 +38,6 @@ class RetryQueueNotifier extends StateNotifier<List<RetryRequest>> {
       try {
         await request.request();
       } catch (e) {
-        // If retry fails, add it back to the queue
         state = [...state, request];
       }
     }

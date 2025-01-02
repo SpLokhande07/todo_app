@@ -54,8 +54,8 @@ class TodoNotifier extends StateNotifier<TodoProviderModel> {
       final response = await _apiService.addTodo(todo);
       if (response.success) {
         state = state.copyWith(
-          todos: [...?state.todos, response.data!],
-          filteredTodos: [...?state.filteredTodos, response.data!],
+          todos: [response.data!, ...?state.todos],
+          filteredTodos: [response.data!, ...?state.filteredTodos],
         );
       }
     } on BaseError catch (e) {

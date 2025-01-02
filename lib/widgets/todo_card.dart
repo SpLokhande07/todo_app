@@ -24,8 +24,11 @@ class TodoCard extends StatelessWidget {
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        color: Colors.red,
         child: const Icon(Icons.delete, color: Colors.white),
+        decoration: BoxDecoration(
+          color: Colors.red,
+          borderRadius: BorderRadius.circular(8),
+        ),
       ),
       child: Card(
         elevation: 3,
