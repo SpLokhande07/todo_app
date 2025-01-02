@@ -4,6 +4,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import '../models/todo.dart';
 import '../providers/todo_provider.dart';
 import '../services/api_service.dart';
+import '../widgets/error_dialog.dart';
 
 class TodoFormScreen extends ConsumerStatefulWidget {
   final Todo? todo;
@@ -46,33 +47,42 @@ class _TodoFormScreenState extends ConsumerState<TodoFormScreen> {
       setState(() => _isLoading = true);
 
       try {
-        if (widget.todo != null) {
-          ref.read(todoProvider.notifier).updateTodoStatus(Todo(
-              id: widget.todo!.id,
-              todo: _todoController.text,
-              completed: _completed,
-              userId: _userId));
-        } else {
-          ref
-              .read(todoProvider.notifier)
-              .addTodo(_todoController.text, _completed, _userId);
-        }
-        Fluttertoast.showToast(
-          msg: widget.todo != null
-              ? "Todo updated successfully!"
-              : "Todo added successfully!",
-          toastLength: Toast.LENGTH_SHORT,
-          gravity: ToastGravity.BOTTOM,
-        );
-        Navigator.pop(context);
+        _executeFunction();
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
+        showDialog(
+          context: context,
+          builder: (context) => ErrorDialog(
+            message: e.toString(),
+            onRetry: () {
+              _executeFunction();
+            },
+          ),
         );
       } finally {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  _executeFunction() {
+    if (widget.todo != null) {
+      ref.read(todoProvider.notifier).updateTodoStatus(Todo(
+          id: widget.todo!.id,
+          todo: _todoController.text,
+          completed: _completed,
+          userId: _userId));
+    } else {
+      ref.read(todoProvider.notifier).addTodo(Todo(
+          todo: _todoController.text, completed: _completed, userId: _userId));
+    }
+    Fluttertoast.showToast(
+      msg: widget.todo != null
+          ? "Todo updated successfully!"
+          : "Todo added successfully!",
+      toastLength: Toast.LENGTH_SHORT,
+      gravity: ToastGravity.BOTTOM,
+    );
+    Navigator.pop(context);
   }
 
   @override

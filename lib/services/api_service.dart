@@ -1,63 +1,151 @@
 import 'package:dio/dio.dart';
 import '../models/todo.dart';
+import '../models/base_response.dart';
+import '../models/base_error.dart';
 import '../utils/constants.dart';
 
 class ApiService {
   final Dio _dio = Dio();
 
-  Future<List<Todo>> getTodos({int limit = 10, int offset = 0}) async {
+  Future<BaseResponse<List<Todo>>> getTodos({int limit = 10, int offset = 0}) async {
     try {
-      final response = await _dio.get('${Constants.baseUrl}/todos',
-          queryParameters: {'limit': limit, 'skip': offset});
-      final List<dynamic> todos = response.data['todos'];
-      return todos.map((todo) => Todo.fromJson(todo)).toList();
+      final response = await _dio.get(
+        '${Constants.baseUrl}/todos',
+        queryParameters: {'limit': limit, 'skip': offset}
+      );
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> todos = response.data['todos'];
+        return BaseResponse.success(
+          todos.map((todo) => Todo.fromJson(todo)).toList()
+        );
+      }
+      
+      throw BaseError(
+        message: 'Failed to fetch todos',
+        statusCode: response.statusCode
+      );
+    } on DioException catch (e) {
+      throw BaseError(
+        message: e.message ?? 'Network error occurred',
+        statusCode: e.response?.statusCode,
+        originalError: e
+      );
     } catch (e) {
-      throw Exception('Failed to fetch todos: $e');
+      throw BaseError(
+        message: 'An unexpected error occurred',
+        originalError: e
+      );
     }
   }
 
-  Future<Todo> getTodo(int id) async {
+  Future<BaseResponse<Todo>> getTodo(int id) async {
     try {
       final response = await _dio.get('${Constants.baseUrl}/todos/$id');
-      return Todo.fromJson(response.data);
+      
+      if (response.statusCode == 200) {
+        return BaseResponse.success(Todo.fromJson(response.data));
+      }
+      
+      throw BaseError(
+        message: 'Failed to fetch todo',
+        statusCode: response.statusCode
+      );
+    } on DioException catch (e) {
+      throw BaseError(
+        message: e.message ?? 'Network error occurred',
+        statusCode: e.response?.statusCode,
+        originalError: e
+      );
     } catch (e) {
-      throw Exception('Failed to fetch todo: $e');
+      throw BaseError(
+        message: 'An unexpected error occurred',
+        originalError: e
+      );
     }
   }
 
-  Future<Todo> addTodo(Todo todo) async {
+  Future<BaseResponse<Todo>> addTodo(Todo todo) async {
     try {
       final response = await _dio.post(
         '${Constants.baseUrl}/todos/add',
-        data: {
-          'todo': todo.todo,
-          'completed': todo.completed,
-          'userId': todo.userId,
-        },
+        data: todo.toJson(),
       );
-      return Todo.fromJson(response.data);
+      
+      if (response.statusCode == 200) {
+        return BaseResponse.success(Todo.fromJson(response.data));
+      }
+      
+      throw BaseError(
+        message: 'Failed to add todo',
+        statusCode: response.statusCode
+      );
+    } on DioException catch (e) {
+      throw BaseError(
+        message: e.message ?? 'Network error occurred',
+        statusCode: e.response?.statusCode,
+        originalError: e
+      );
     } catch (e) {
-      throw Exception('Failed to add todo: $e');
+      throw BaseError(
+        message: 'An unexpected error occurred',
+        originalError: e
+      );
     }
   }
 
-  Future<Response<dynamic>> updateTodoCompletedStatus(Todo todo) async {
+  Future<BaseResponse<Todo>> updateTodoCompletedStatus(Todo todo) async {
     try {
-      return await _dio.put(
+      final response = await _dio.put(
         '${Constants.baseUrl}/todos/${todo.id}',
-        data: {'completed': todo.completed, "todo": todo.todo},
-        options: Options(headers: {'Content-Type': 'application/json'}),
+        data: todo.toJson(),
+      );
+      
+      if (response.statusCode == 200) {
+        return BaseResponse.success(Todo.fromJson(response.data));
+      }
+      
+      throw BaseError(
+        message: 'Failed to update todo',
+        statusCode: response.statusCode
+      );
+    } on DioException catch (e) {
+      throw BaseError(
+        message: e.message ?? 'Network error occurred',
+        statusCode: e.response?.statusCode,
+        originalError: e
       );
     } catch (e) {
-      throw Exception('Failed to update todo: $e');
+      throw BaseError(
+        message: 'An unexpected error occurred',
+        originalError: e
+      );
     }
   }
 
-  Future<void> deleteTodo(int id) async {
+  Future<BaseResponse<void>> deleteTodo(int id) async {
     try {
-      await _dio.delete('${Constants.baseUrl}/todos/$id');
+      final response = await _dio.delete('${Constants.baseUrl}/todos/$id');
+      
+      if (response.statusCode == 200) {
+        return BaseResponse.success(null);
+      }
+      
+      throw BaseError(
+        message: 'Failed to delete todo',
+        statusCode: response.statusCode
+      );
+    } on DioException catch (e) {
+      throw BaseError(
+        message: e.message ?? 'Network error occurred',
+        statusCode: e.response?.statusCode,
+        originalError: e
+      );
     } catch (e) {
-      throw Exception('Failed to delete todo: $e');
+      throw BaseError(
+        message: 'An unexpected error occurred',
+        originalError: e
+      );
     }
   }
 }

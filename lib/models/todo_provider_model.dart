@@ -7,6 +7,7 @@ class TodoProviderModel extends Equatable {
   List<Todo>? filteredTodos = [];
   int offset;
   Status? status;
+  String? error;
 
   TodoProviderModel.initial()
       : status = Status.initial,
@@ -17,6 +18,7 @@ class TodoProviderModel extends Equatable {
     this.filteredTodos,
     this.status,
     this.offset = 0,
+    this.error,
   });
 
   TodoProviderModel copyWith({
@@ -24,12 +26,14 @@ class TodoProviderModel extends Equatable {
     List<Todo>? filteredTodos,
     Status? status,
     int? offset,
+    String? error,
   }) {
     return TodoProviderModel(
       todos: todos ?? this.todos,
       filteredTodos: filteredTodos ?? this.filteredTodos,
       status: status ?? this.status,
       offset: offset ?? this.offset,
+      error: error ?? this.error,
     );
   }
 
@@ -38,5 +42,6 @@ class TodoProviderModel extends Equatable {
         todos,
         status,
         offset,
+        error,
       ];
 }

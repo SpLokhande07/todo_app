@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/todo.dart';
 import '../services/api_service.dart';
 import '../use_cases/fetch_todos_use_case.dart';
+import '../models/base_error.dart';
+import 'retry_queue_provider.dart';
 
 final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 final fetchTodosUseCaseProvider = Provider<FetchTodosUseCase>((ref) {
@@ -17,100 +19,136 @@ final todoProvider =
 });
 
 class TodoNotifier extends StateNotifier<TodoProviderModel> {
+  final Ref _ref;
   final ApiService _apiService;
-  final FetchTodosUseCase _fetchTodosUseCase;
+  bool _hasReachedEnd = false;
+  bool _isFetching = false;
 
-  TodoNotifier(Ref ref)
-      : _apiService = ref.read(apiServiceProvider),
-        _fetchTodosUseCase = ref.read(fetchTodosUseCaseProvider),
+  TodoNotifier(this._ref)
+      : _apiService = _ref.read(apiServiceProvider),
         super(TodoProviderModel());
 
   Future<void> updateTodoStatus(Todo todo) async {
     try {
-      Response response = await _apiService.updateTodoCompletedStatus(todo);
-      final todos = state.todos!;
-      final index = todos.indexWhere((todoVal) => todoVal.id == todo.id);
-      final filteredTodos = state.filteredTodos!;
-      if (index != -1) {
-        filteredTodos[index] = Todo.fromJson(response.data);
-        todos[index] = Todo.fromJson(response.data);
+      final response = await _apiService.updateTodoCompletedStatus(todo);
+      if (response.success) {
+        state = state.copyWith(
+          todos: state.todos
+              ?.map((t) => t.id == todo.id ? response.data! : t)
+              .toList(),
+          filteredTodos: state.filteredTodos
+              ?.map((t) => t.id == todo.id ? response.data! : t)
+              .toList(),
+        );
       }
-      state = state.copyWith(todos: todos, filteredTodos: filteredTodos);
-    } catch (e) {
-      state = state.copyWith(
-        status: Status.failure,
-      );
+    } on BaseError catch (e) {
+      _ref.read(retryQueueProvider.notifier).addFailedRequest(
+            () => updateTodoStatus(todo),
+          );
+      rethrow;
     }
   }
 
-  Future<void> deleteTodoById(int id) async {
+  Future<void> addTodo(Todo todo) async {
     try {
-      await _apiService.deleteTodo(id);
-      List<Todo>? todos = state.todos?.where((todo) => todo.id != id).toList();
-      List<Todo>? filteredTodos =
-          state.filteredTodos?.where((todo) => todo.id != id).toList();
-      state = state.copyWith(
-        todos: todos,
-        filteredTodos: filteredTodos,
-      );
-    } catch (e) {
-      state = state.copyWith(
-        status: Status.failure,
-      );
+      final response = await _apiService.addTodo(todo);
+      if (response.success) {
+        state = state.copyWith(
+          todos: [...?state.todos, response.data!],
+          filteredTodos: [...?state.filteredTodos, response.data!],
+        );
+      }
+    } on BaseError catch (e) {
+      _ref.read(retryQueueProvider.notifier).addFailedRequest(
+            () => addTodo(todo),
+          );
+      rethrow;
     }
   }
 
-  Future<void> addTodo(String todo, bool completed, int userId) async {
+  Future<void> deleteTodo(int id) async {
     try {
-      final newTodo = await _apiService.addTodo(Todo(
-        todo: todo,
-        completed: completed,
-        userId: userId,
-      ));
-      state = state.copyWith(
-          todos: [newTodo, ...state.todos!],
-          filteredTodos: [newTodo, ...state.filteredTodos!]);
-    } catch (e) {
-      state = state.copyWith(
-        status: Status.failure,
-      );
+      final response = await _apiService.deleteTodo(id);
+      if (response.success) {
+        state = state.copyWith(
+          todos: state.todos?.where((todo) => todo.id != id).toList(),
+          filteredTodos:
+              state.filteredTodos?.where((todo) => todo.id != id).toList(),
+        );
+      }
+    } on BaseError catch (e) {
+      _ref.read(retryQueueProvider.notifier).addFailedRequest(
+            () => deleteTodo(id),
+          );
+      rethrow;
     }
   }
 
-  Future fetchTodos() async {
+  Future<void> fetchTodos() async {
+    if (_isFetching || _hasReachedEnd) return;
+
+    _isFetching = true;
     state = state.copyWith(status: Status.loading);
+
     try {
-      final todos =
-          await _fetchTodosUseCase.execute(offset: state.offset, limit: 20);
-      state = state.copyWith(
-        status: Status.success,
-        todos: [...state.todos ?? [], ...todos],
-        filteredTodos: [...state.filteredTodos ?? [], ...todos],
-        offset: state.offset + todos.length,
-      );
-    } catch (e) {
-      state = state.copyWith(
-        status: Status.failure,
-      );
+      final response =
+          await _apiService.getTodos(offset: state.offset, limit: 20);
+
+      if (response.success) {
+        final newTodos = response.data ?? [];
+
+        if (newTodos.isEmpty) {
+          _hasReachedEnd = true;
+          return;
+        }
+
+        // Check for duplicates
+        final existingIds = state.todos?.map((t) => t.id).toSet() ?? {};
+        final uniqueNewTodos =
+            newTodos.where((todo) => !existingIds.contains(todo.id)).toList();
+
+        if (uniqueNewTodos.isEmpty) {
+          _hasReachedEnd = true;
+          return;
+        }
+
+        state = state.copyWith(
+          status: Status.success,
+          todos: [...?state.todos, ...uniqueNewTodos],
+          filteredTodos: [...?state.filteredTodos, ...uniqueNewTodos],
+          offset: state.offset + uniqueNewTodos.length,
+        );
+      }
+    } on BaseError catch (e) {
+      state = state.copyWith(status: Status.failure, error: e.message);
+      _ref.read(retryQueueProvider.notifier).addFailedRequest(
+            () => fetchTodos(),
+          );
+    } finally {
+      _isFetching = false;
     }
   }
 
-  searchTodos(String query) async {
-    state = state.copyWith(status: Status.loading);
-    try {
-      final todos = state.todos!;
-      final filteredTodos = query.length == 0
-          ? todos
-          : todos.where((todo) => todo.todo!.contains(query)).toList();
+  void resetPagination() {
+    _hasReachedEnd = false;
+    state = state.copyWith(
+      todos: [],
+      filteredTodos: [],
+      offset: 0,
+      status: Status.initial,
+    );
+  }
 
-      state = state.copyWith(
-        status: Status.success,
-        filteredTodos: filteredTodos,
-      );
-    } catch (e) {
-      state = state.copyWith(
-        status: Status.failure,
-      );
+  void searchTodos(String query) {
+    if (query.isEmpty) {
+      state = state.copyWith(filteredTodos: state.todos);
+      return;
     }
+
+    final filteredTodos = state.todos?.where((todo) {
+      return todo.todo?.toLowerCase().contains(query.toLowerCase()) ?? false;
+    }).toList();
+
+    state = state.copyWith(filteredTodos: filteredTodos);
   }
 }

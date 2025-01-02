@@ -1,27 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:logger/logger.dart';
 import '../models/todo.dart';
 import '../providers/todo_provider.dart';
-import '../services/api_service.dart';
+import '../models/todo_provider_model.dart';
 import '../utils/enums.dart';
-import 'post_form_screen.dart';
 import '../widgets/todo_card.dart';
-import 'dart:async';
-import 'package:logger/logger.dart';
+import '../widgets/error_dialog.dart';
+import 'post_form_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({Key? key}) : super(key: key);
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  final ScrollController _scrollController = ScrollController();
+  final _logger = Logger();
   bool _isSearchVisible = false;
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  Timer? _debounce;
-  final Logger _logger = Logger();
 
   @override
   void initState() {
@@ -29,37 +28,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback(
       (_) {
         _logger.i('Fetching todos...');
-        ref.read(todoProvider.notifier).fetchTodos();
+        _fetchTodos();
       },
     );
     _scrollController.addListener(_onScroll);
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _scrollController.dispose();
-    _debounce?.cancel();
-    super.dispose();
+  Future<void> _fetchTodos() async {
+    try {
+      await ref.read(todoProvider.notifier).fetchTodos();
+    } catch (e) {
+      if (mounted) {
+        ErrorDialog.show(
+          context,
+          message: e.toString(),
+          onRetry: _fetchTodos,
+        );
+      }
+    }
   }
 
   void _onScroll() {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () {
-      if (_scrollController.offset >=
-              _scrollController.position.maxScrollExtent - 400 &&
-          !_scrollController.position.outOfRange) {
-        _logger.i('Fetching todos...');
-        ref.read(todoProvider.notifier).fetchTodos();
-      }
-    });
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _fetchTodos();
+    }
+  }
+
+  Future<void> _refreshTodos() async {
+    ref.read(todoProvider.notifier).resetPagination();
+    await _fetchTodos();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.teal,
         title: _isSearchVisible
             ? TextField(
                 controller: _searchController,
@@ -67,20 +78,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   hintText: 'Search todos...',
                   border: InputBorder.none,
                 ),
-                onChanged: (value) =>
-                    ref.read(todoProvider.notifier).searchTodos(value),
+                onChanged: (value) {
+                  ref.read(todoProvider.notifier).searchTodos(value);
+                },
               )
-            : const Text('Todo List', style: TextStyle(color: Colors.white)),
+            : const Text('Todos'),
         actions: [
           IconButton(
-            icon: Icon(
-              _isSearchVisible ? Icons.close : Icons.search,
-              color: Colors.white,
-            ),
+            icon: Icon(_isSearchVisible ? Icons.close : Icons.search),
             onPressed: () {
               setState(() {
                 _isSearchVisible = !_isSearchVisible;
-                _logger.i('Search toggled: $_isSearchVisible');
                 if (!_isSearchVisible) {
                   _searchController.clear();
                   ref.read(todoProvider.notifier).searchTodos('');
@@ -90,39 +98,84 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Consumer(
-          builder: (context, ref, _) {
-            final todosAsyncValue = ref.watch(todoProvider.notifier);
-            final todoPro = ref.watch(todoProvider);
-            if ((todoPro.status == Status.loading &&
-                    todoPro.todos != null &&
-                    todoPro.todos!.isEmpty) ||
-                todoPro.todos == null) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (todoPro.status == Status.failure) {
-              return const Center(child: Text('Failed to fetch todos'));
-            }
-            return ListView.builder(
+      body: Consumer(
+        builder: (context, ref, child) {
+          final todoState = ref.watch(todoProvider);
+
+          if (todoState.status == Status.loading && todoState.todos == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (todoState.status == Status.failure) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(todoState.error ?? 'An error occurred'),
+                  ElevatedButton(
+                    onPressed: _fetchTodos,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          final todos = todoState.filteredTodos ?? [];
+
+          return RefreshIndicator(
+            onRefresh: _refreshTodos,
+            child: ListView.builder(
               controller: _scrollController,
-              itemCount: todoPro.filteredTodos!.length + 1,
+              itemCount:
+                  todos.length + (todoState.status == Status.loading ? 1 : 0),
               itemBuilder: (context, index) {
-                if (index == todoPro.filteredTodos!.length) {
-                  if (todoPro.offset < todoPro.todos!.length) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  return const SizedBox.shrink();
+                if (index == todos.length) {
+                  return const Center(child: CircularProgressIndicator());
                 }
-                final todo = todoPro.filteredTodos![index];
+
+                final todo = todos[index];
                 return TodoCard(
                   todo: todo,
-                  onDelete: () => todosAsyncValue.deleteTodoById(todo.id!),
-                  onToggleComplete: (value) =>
-                      todosAsyncValue.updateTodoStatus(todo),
+                  onToggleComplete: (value) async {
+                    try {
+                      final updatedTodo = Todo(
+                        id: todo.id,
+                        todo: todo.todo,
+                        completed: value,
+                        userId: todo.userId,
+                      );
+                      await ref
+                          .read(todoProvider.notifier)
+                          .updateTodoStatus(updatedTodo);
+                    } catch (e) {
+                      if (mounted) {
+                        ErrorDialog.show(
+                          context,
+                          message: e.toString(),
+                          onRetry: () => ref
+                              .read(todoProvider.notifier)
+                              .updateTodoStatus(todo),
+                        );
+                      }
+                    }
+                  },
+                  onDelete: () async {
+                    try {
+                      await ref.read(todoProvider.notifier).deleteTodo(todo.id!);
+                    } catch (e) {
+                      if (mounted) {
+                        ErrorDialog.show(
+                          context,
+                          message: e.toString(),
+                          onRetry: () => ref
+                              .read(todoProvider.notifier)
+                              .deleteTodo(todo.id!),
+                        );
+                      }
+                    }
+                  },
                   onTap: () {
-                    _logger.i('Navigating to TodoFormScreen');
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -132,22 +185,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   },
                 );
               },
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.teal,
-        onPressed: () {
-          _logger.i('Navigating to TodoFormScreen');
-          Navigator.push(
+        onPressed: () async {
+          final result = await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => const TodoFormScreen(),
             ),
           );
+
+          if (result != null && result is Todo) {
+            try {
+              await ref.read(todoProvider.notifier).addTodo(result);
+            } catch (e) {
+              if (mounted) {
+                ErrorDialog.show(
+                  context,
+                  message: e.toString(),
+                  onRetry: () =>
+                      ref.read(todoProvider.notifier).addTodo(result),
+                );
+              }
+            }
+          }
         },
-        child: const Icon(Icons.add, color: Colors.white),
+        child: const Icon(Icons.add),
       ),
     );
   }
